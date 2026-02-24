@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 from geo_mlops.core.tiling.engine import EngineConfig
 from geo_mlops.core.tiling.policies import AllPolicy, HardMiningPolicy, RegularPolicy
-from cli.cfg_loader import load_cfg
+from geo_mlops.cli.cfg_loader import load_cfg
 from geo_mlops.tasks.segmentation.building.adapter import BuildingSegmentationAdapter
 
 
