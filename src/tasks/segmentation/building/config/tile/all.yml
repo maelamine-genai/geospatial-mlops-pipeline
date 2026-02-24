@@ -1,0 +1,18 @@
+engine:
+  pan_dirname: PAN
+  gt_dirname: GT-Masks
+  context_dirname: Context
+  target_size_m: 100
+  overlap: 0.5
+  skip_tiles_with_nodata: true
+
+adapter:
+  class_of_interest_id: 1
+  emit_shadow: true
+  shadow_id: 2
+
+policy:
+  kind: all
+
+meta:
+  csv_name_default: building_tiles_all.csv

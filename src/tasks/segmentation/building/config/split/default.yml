@@ -1,0 +1,19 @@
+version: 1
+
+stage:
+  splits: { train: 0.8, val: 0.2 }
+  seed: 1337
+
+grouping:
+  group_col: region
+
+stratification:
+  kind: binned_group_metric
+  group_metric:
+    mode: presence_frac
+    source_col: building_ratio
+    presence_eps: 0.001
+  bins: [0.0, 0.05, 0.2, 0.6, 1.0]
+
+outputs:
+  group_list_prefix: regions
