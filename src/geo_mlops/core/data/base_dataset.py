@@ -17,7 +17,7 @@ class TileRecord:
 
     NOTE: Task-specific datasets should override `row_to_record()` if they need more fields.
     """
-    tile_id: str
+    # tile_id: str
     scene_id: str
     image_src: Path
     x0: int
@@ -119,7 +119,7 @@ class BaseRasterTileDataset:
             return Path(s)
 
         return TileRecord(
-            tile_id=str(row["tile_id"]),
+            # tile_id=str(row["tile_id"]),
             scene_id=str(row["scene_id"]),
             image_src=Path(str(row["image_src"])),
             x0=int(row["x0"]),

@@ -23,8 +23,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 import yaml
-from geo_mlops.core.contracts.splits_contract import SplitContract
-from geo_mlops.core.io.splits_io import write_split_contract
+from geo_mlops.core.contracts.split_contract import SplitContract
+from geo_mlops.core.io.split_io import write_split_contract
 from geo_mlops.core.io.tile_io import load_tiles_contract
 from geo_mlops.core.splitting.split import (
     SplitConfig,

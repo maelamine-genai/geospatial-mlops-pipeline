@@ -17,6 +17,7 @@ from geo_mlops.core.tiling.adapters.base import (
 from geo_mlops.core.tiling.utils import (
     _relaxed_lookup,
     compute_gsd_from_gcps,
+    gsd_from_epsg4326,
     gen_tiles_cover,
 )
 
@@ -93,14 +94,17 @@ class RoiTilingEngine:
         # -----------------------------
         pan_dir = subdir / self.cfg.pan_dirname
         if not pan_dir.is_dir():
+            print(f"Scene {subdir} skipped: pan_dir not found at {pan_dir}")
             return [], stats
 
         gt_dir = subdir / self.cfg.gt_dirname
         if self.adapter.require_gt_dir() and not gt_dir.is_dir():
+            print(f"Scene {subdir} skipped: gt_dir required but not found at {gt_dir}")
             return [], stats
 
         ctx_dir = subdir / self.cfg.context_dirname
         if self.adapter.require_context_dir() and not ctx_dir.is_dir():
+            print(f"Scene {subdir} skipped: context_dir required but not found at {ctx_dir}")
             stats["roi_context_missing"] = True
             return [], stats
 
@@ -152,13 +156,15 @@ class RoiTilingEngine:
             # -----------------------------
             try:
                 with rasterio.open(pan_path) as src:
-                    pan_2d = src.read()
-                    meta = src.meta.copy()
+                    pan_2d = src.read(1)
+                    # print("crs:", src.crs)
+                    # print("transform:", src.transform)
+                    # print("bounds:", src.bounds)
+                    # meta = src.meta.copy()
+                    # print(meta)
                 H, W = pan_2d.shape
-                gsd_mpp = float(compute_gsd_from_gcps(meta.gcps[0]))
-                pan_data = pan_2d.data
-                nodata_val = pan_2d.fill_value
-                pan_mask = pan_data == nodata_val
+                # gsd_mpp = float(compute_gsd_from_gcps(meta.gcps[0]))
+                gsd_mpp = gsd_from_epsg4326(pan_path)
             except (FileNotFoundError, OSError):
                 stats["scenes_read_error"] += 1
                 continue
@@ -204,7 +210,6 @@ class RoiTilingEngine:
                 gsd_mpp=float(gsd_mpp),
                 gt2d=gt2d,
                 pred2d=pred2d,
-                pan_mask=pan_mask,
             )
 
             # Adapter may populate derived layers (optional)

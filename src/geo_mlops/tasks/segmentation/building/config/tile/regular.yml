@@ -1,6 +1,6 @@
 engine:
   pan_dirname: PAN
-  gt_dirname: GT-Masks
+  gt_dirname: GT-Mask
   context_dirname: Context
   target_size_m: 100
   overlap: 0.5

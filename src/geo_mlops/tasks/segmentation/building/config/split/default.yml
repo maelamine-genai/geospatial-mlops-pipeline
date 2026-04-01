@@ -1,7 +1,7 @@
 version: 1
 
 stage:
-  splits: { train: 0.8, val: 0.2 }
+  splits: { train: 0.5, val: 0.5 }
   seed: 1337
 
 grouping:

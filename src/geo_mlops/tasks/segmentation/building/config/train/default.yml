@@ -1,0 +1,89 @@
+# ============================================================
+# Building Segmentation - Default Training Config
+# ============================================================
+
+experiment:
+  name: building_seg_baseline
+  description: >
+    SegFormer-based binary building segmentation on PAN + Context.
+  seed: 1337
+
+# ------------------------------------------------------------
+# Data section
+# ------------------------------------------------------------
+data:
+  # PAN normalization
+  reflectance_max: 10000
+
+  # Context usage
+  use_context: true
+
+  # Channel shaping
+  tile_out_channels: 1
+  context_out_channels: 1
+
+  # Dataset performance knobs
+  context_cache_max_items: 256
+
+# ------------------------------------------------------------
+# Augmentation
+# ------------------------------------------------------------
+augment:
+  enabled: true
+  flip: true
+  rot90: true
+  noise_std: 0.0   # e.g. 0.02 if you want mild PAN noise
+
+# ------------------------------------------------------------
+# Model
+# ------------------------------------------------------------
+model:
+  backbone:
+    base_name: segformer_b0              # e.g. segformer-b0
+    num_classes: 1
+    image_size: 512              # model input size (after cropping/resizing)
+    # pretrained: false
+    # in_channels: 1           # PAN only (context fused later)
+    # dropout: 0.1
+
+  fusion:
+    type: concat             # for future flexibility
+
+# ------------------------------------------------------------
+# Optimization
+# ------------------------------------------------------------
+optim:
+  optimizer: adamw
+  lr: 3e-4
+  weight_decay: 1e-4
+
+  scheduler:
+    type: none               # options: none, cosine, step
+
+# ------------------------------------------------------------
+# Loss
+# ------------------------------------------------------------
+loss:
+  type: bce                  # bce | dice | bce_dice
+  pos_weight: 1.0            # class imbalance control
+
+# ------------------------------------------------------------
+# Training
+# ------------------------------------------------------------
+train:
+  epochs: 20
+  batch_size: 8
+  num_workers: 4
+
+  mixed_precision: true
+  grad_clip_norm: 1.0
+
+# ------------------------------------------------------------
+# Evaluation
+# ------------------------------------------------------------
+eval:
+  metric: iou
+  threshold: 0.5
+
+  save_best: true
+  save_last: true
