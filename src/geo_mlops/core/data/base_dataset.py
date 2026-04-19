@@ -17,7 +17,6 @@ class TileRecord:
 
     NOTE: Task-specific datasets should override `row_to_record()` if they need more fields.
     """
-    # tile_id: str
     scene_id: str
     image_src: Path
     x0: int
@@ -119,7 +118,6 @@ class BaseRasterTileDataset:
             return Path(s)
 
         return TileRecord(
-            # tile_id=str(row["tile_id"]),
             scene_id=str(row["scene_id"]),
             image_src=Path(str(row["image_src"])),
             x0=int(row["x0"]),
@@ -142,7 +140,7 @@ class BaseRasterTileDataset:
         w = int(rec.x1 - rec.x0)
         h = int(rec.y1 - rec.y0)
         if w <= 0 or h <= 0:
-            raise ValueError(f"Invalid window for tile_id={rec.tile_id}: "
+            raise ValueError(f"Invalid window for scene_id={rec.scene_id}: "
                              f"(x0,y0,x1,y1)=({rec.x0},{rec.y0},{rec.x1},{rec.y1})")
         return Window(col_off=int(rec.x0), row_off=int(rec.y0), width=w, height=h)
 
@@ -216,7 +214,7 @@ class BaseRasterTileDataset:
         Returns (C,H,W). No normalization is applied here; task datasets can normalize.
         """
         if rec.context_src is None:
-            raise ValueError(f"context_src missing for tile_id={rec.tile_id}")
+            raise ValueError(f"context_src missing for scene_id={rec.scene_id}")
 
         key = str(rec.context_src)
         cached = self._ctx_cache_get(key)
@@ -246,7 +244,6 @@ class BaseRasterTileDataset:
         """
         img = self.read_image_window(rec)
         return {
-            "tile_id": rec.tile_id,
             "scene_id": rec.scene_id,
             "image": img,
             "x0": rec.x0,

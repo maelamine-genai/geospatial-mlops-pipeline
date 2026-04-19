@@ -1,0 +1,7 @@
+fail_on_missing: true
+allow_nan: false
+checks:
+  - metric: best_val_iou
+    scope: micro
+    comparator: ">="
+    threshold: 0.1

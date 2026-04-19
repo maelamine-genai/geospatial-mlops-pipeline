@@ -36,7 +36,7 @@ class BuildingSegWithContextDataset(BaseRasterTileDataset):
     Building semantic segmentation dataset built on the new BaseRasterTileDataset.
 
     Expected tiles_master.csv columns (contract-driven):
-      - tile_id, scene_id, image_src, gt_src, context_src
+      - scene_id, image_src, gt_src, context_src
       - x0, y0, x1, y1
       - plus optional meta columns (region/subregion/stem/gsd/stride/etc.)
 
@@ -78,7 +78,7 @@ class BuildingSegWithContextDataset(BaseRasterTileDataset):
     # -------------------------
     @classmethod
     def required_columns(cls) -> Tuple[str, ...]:
-        # base requires tile_id, scene_id, image_src, x0,y0,x1,y1
+        # base requires scene_id, image_src, x0,y0,x1,y1
         # for building seg we require gt_src; context_src only if enabled
         return ("scene_id", "image_src", "gt_src", "x0", "y0", "x1", "y1")
 
@@ -100,7 +100,7 @@ class BuildingSegWithContextDataset(BaseRasterTileDataset):
         Read single-band GT window. Returns (H,W) int64.
         """
         if rec.gt_src is None:
-            raise ValueError(f"gt_src missing for tile_id={rec.tile_id}")
+            raise ValueError(f"gt_src missing for scene_id={rec.scene_id}")
         win = self._window_from_record(rec)
         gt_hw = self.read_window(rec.gt_src, win, band=1)  # dtype as stored
         return gt_hw.astype(np.int64, copy=False)
@@ -152,7 +152,7 @@ class BuildingSegWithContextDataset(BaseRasterTileDataset):
     def build_sample(self, rec: TileRecord) -> Dict[str, Any]:
         # Enforce context requirement at dataset level if enabled
         if self.cfg.use_context and rec.context_src is None:
-            raise ValueError(f"context_src missing but use_context=True for tile_id={rec.tile_id}")
+            raise ValueError(f"context_src missing but use_context=True for scene_id={rec.scene_id}")
 
         # Read
         pan_hw = self._pan_window_float01(rec)            # (H,W) float32
@@ -198,7 +198,6 @@ class BuildingSegWithContextDataset(BaseRasterTileDataset):
     def _build_meta(self, rec: TileRecord) -> Dict[str, Any]:
         # Keep meta lightweight; training can log more if needed
         return {
-            # "tile_id": rec.tile_id,
             "scene_id": rec.scene_id,
             "image_src": str(rec.image_src),
             "gt_src": str(rec.gt_src) if rec.gt_src else "",

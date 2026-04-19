@@ -114,7 +114,7 @@ def train_one_run(
 
     # write metrics + manifest
     metrics_path = out_dir / "metrics.json"
-    metrics["best_val_iou"] = best_val_iou
+    metrics["best_val_iou"] = {best_val_iou}
     metrics_path.write_text(json.dumps(metrics, indent=2))
 
     manifest = {

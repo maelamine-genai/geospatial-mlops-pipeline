@@ -1,0 +1,5 @@
+checks:
+  - metric: iou
+    scope: golden_test
+    comparator: ">="
+    threshold: 0.1
