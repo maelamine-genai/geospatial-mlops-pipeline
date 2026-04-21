@@ -146,7 +146,7 @@ This gating mechanism enforces **objective, reproducible promotion criteria**, e
 
 ### 🧩 Argo Workflows (Pipeline Orchestration)
 
-![Argo](./docs/argo.png)
+![Argo](./docs/Argo.png)
 
 *Figure: End-to-end DAG execution of the MLOps pipeline*
 
