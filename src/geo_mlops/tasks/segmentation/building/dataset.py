@@ -9,43 +9,59 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 
-from geo_mlops.core.data.base_dataset import BaseRasterTileDataset, TileRecord
+from geo_mlops.core.dataset.base import BaseRasterTileDataset, TileRecord
 
 
 @dataclass(frozen=True)
-class BuildingSegConfig:
-    # Normalization for PAN reflectance -> [0,1]
+class BuildingDatasetConfig:
+    # PAN reflectance normalization
     reflectance_max: float = 10_000.0
 
-    # Whether context is required/used
+    # Context usage
     use_context: bool = True
 
-    # Output channels (mostly for convenience if you later want to expand channels)
+    # Output channels
     tile_out_channels: int = 1
     context_out_channels: int = 1
 
-    # Augmentation knobs
+    # Augmentation
     do_aug: bool = False
     aug_flip: bool = True
     aug_rot90: bool = True
-    aug_noise_std: float = 0.0  # applied to tile only
+    aug_noise_std: float = 0.0
+
+    @classmethod
+    def from_dict(cls, cfg: Dict[str, Any] | None) -> "BuildingDatasetConfig":
+        cfg = cfg or {}
+        return cls(
+            reflectance_max=float(cfg.get("reflectance_max", cls.reflectance_max)),
+            use_context=bool(cfg.get("use_context", cls.use_context)),
+            tile_out_channels=int(cfg.get("tile_out_channels", cls.tile_out_channels)),
+            context_out_channels=int(cfg.get("context_out_channels", cls.context_out_channels)),
+            do_aug=bool(cfg.get("do_aug", cls.do_aug)),
+            aug_flip=bool(cfg.get("aug_flip", cls.aug_flip)),
+            aug_rot90=bool(cfg.get("aug_rot90", cls.aug_rot90)),
+            aug_noise_std=float(cfg.get("aug_noise_std", cls.aug_noise_std)),
+        )
 
 
-class BuildingSegWithContextDataset(BaseRasterTileDataset):
+class BuildingDataset(BaseRasterTileDataset):
     """
-    Building semantic segmentation dataset built on the new BaseRasterTileDataset.
+    Building segmentation dataset.
 
-    Expected tiles_master.csv columns (contract-driven):
-      - scene_id, image_src, gt_src, context_src
+    Expected tiles_master.csv columns:
+      - scene_id
+      - image_src
+      - gt_src
       - x0, y0, x1, y1
-      - plus optional meta columns (region/subregion/stem/gsd/stride/etc.)
+      - context_src if use_context=True
 
     Returns:
       {
-        "tile_tensor":    torch.float32 [C,H,W] in [0,1]
-        "context_tensor": torch.float32 [C,h,w] in [0,1]   (if use_context)
-        "mask":           torch.int64   [H,W]   (binary or multi-class depending on GT)
-        "meta":           dict
+        "tile_tensor": torch.float32 [C,H,W],
+        "context_tensor": torch.float32 [C,H,W], optional,
+        "mask": torch.int64 [H,W],
+        "meta": dict
       }
     """
 
@@ -54,11 +70,9 @@ class BuildingSegWithContextDataset(BaseRasterTileDataset):
         *,
         tiles_df: pd.DataFrame,
         indices: Optional[Sequence[int]] = None,
-        cfg: BuildingSegConfig = BuildingSegConfig(),
-        # caching (maps to BaseRasterTileDataset context cache)
+        cfg: BuildingDatasetConfig = BuildingDatasetConfig(),
         cache_context: bool = True,
         context_cache_max_items: int = 256,
-        # optional transforms
         tile_transform: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
         context_transform: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
     ) -> None:
@@ -73,130 +87,129 @@ class BuildingSegWithContextDataset(BaseRasterTileDataset):
             context_cache_max_items=context_cache_max_items,
         )
 
-    # -------------------------
-    # Schema
-    # -------------------------
     @classmethod
     def required_columns(cls) -> Tuple[str, ...]:
-        # base requires scene_id, image_src, x0,y0,x1,y1
-        # for building seg we require gt_src; context_src only if enabled
         return ("scene_id", "image_src", "gt_src", "x0", "y0", "x1", "y1")
 
-    # -------------------------
-    # IO helpers
-    # -------------------------
     def _pan_window_float01(self, rec: TileRecord) -> np.ndarray:
-        """
-        Read single-band PAN window and normalize to [0,1] using reflectance_max.
-        Returns (H, W) float32.
-        """
         win = self._window_from_record(rec)
-        pan_hw = self.read_window(rec.image_src, win, band=1, out_dtype=np.float32)  # (H,W)
-        pan_hw = np.clip(pan_hw, 0.0, float(self.cfg.reflectance_max)) / max(1e-6, float(self.cfg.reflectance_max))
+
+        pan_hw = self.read_window(
+            rec.image_src,
+            win,
+            band=1,
+            out_dtype=np.float32,
+        )
+
+        ref_max = max(1e-6, float(self.cfg.reflectance_max))
+        pan_hw = np.clip(pan_hw, 0.0, ref_max) / ref_max
         return pan_hw.astype(np.float32, copy=False)
 
     def _gt_window_int(self, rec: TileRecord) -> np.ndarray:
-        """
-        Read single-band GT window. Returns (H,W) int64.
-        """
         if rec.gt_src is None:
             raise ValueError(f"gt_src missing for scene_id={rec.scene_id}")
+
         win = self._window_from_record(rec)
-        gt_hw = self.read_window(rec.gt_src, win, band=1)  # dtype as stored
+        gt_hw = self.read_window(rec.gt_src, win, band=1)
         return gt_hw.astype(np.int64, copy=False)
 
     def _context_float01(self, rec: TileRecord) -> torch.Tensor:
-        """
-        Read full context raster and normalize to [0,1].
-        Context is expected to be uint8 (from your make_context stage).
-        Returns torch tensor [C,h,w] float32.
-        """
-        ctx = self.read_context(rec)  # (C,h,w) numpy
+        if rec.context_src is None:
+            raise ValueError(f"context_src missing for scene_id={rec.scene_id}")
+
+        ctx = self.read_context(rec)
         ctx = np.asarray(ctx, dtype=np.float32) / 255.0
+
         ctx_t = torch.from_numpy(ctx)
-        # enforce channel count if desired
         ctx_t = self._to_channels(ctx_t, int(self.cfg.context_out_channels))
         return ctx_t
-    
-    def _resize_context_to_tile(self, ctx_t: torch.Tensor, H: int, W: int) -> torch.Tensor:
-        # ctx_t: [C,h,w] -> [C,H,W]
-        ctx = ctx_t.unsqueeze(0)  # [1,C,h,w]
-        ctx = F.interpolate(ctx, size=(H, W), mode="bilinear", align_corners=False)
+
+    @staticmethod
+    def _resize_context_to_tile(ctx_t: torch.Tensor, height: int, width: int) -> torch.Tensor:
+        ctx = ctx_t.unsqueeze(0)
+        ctx = F.interpolate(
+            ctx,
+            size=(height, width),
+            mode="bilinear",
+            align_corners=False,
+        )
         return ctx.squeeze(0)
 
     @staticmethod
     def _to_channels(x: torch.Tensor, out_channels: int) -> torch.Tensor:
-        """
-        Ensure tensor is [C,H,W] with out_channels.
-        If C==1 and out_channels==3, repeat. If C==3 and out_channels==1, take first band.
-        Otherwise, no-op.
-        """
         if x.ndim != 3:
             raise ValueError(f"Expected [C,H,W], got shape {tuple(x.shape)}")
-        c, h, w = x.shape
-        if out_channels == c:
+
+        channels = int(x.shape[0])
+
+        if out_channels <= 0:
+            raise ValueError(f"out_channels must be positive, got {out_channels}")
+
+        if channels == out_channels:
             return x
-        if c == 1 and out_channels > 1:
+
+        if channels == 1 and out_channels > 1:
             return x.repeat(out_channels, 1, 1)
-        if c > 1 and out_channels == 1:
-            return x[:1, :, :]
-        # fallback: pad/truncate
-        if c > out_channels:
+
+        if channels > out_channels:
             return x[:out_channels, :, :]
-        pad = out_channels - c
+
+        pad = out_channels - channels
         return torch.cat([x, x[-1:, :, :].repeat(pad, 1, 1)], dim=0)
 
-    # -------------------------
-    # Sample building
-    # -------------------------
     def build_sample(self, rec: TileRecord) -> Dict[str, Any]:
-        # Enforce context requirement at dataset level if enabled
         if self.cfg.use_context and rec.context_src is None:
-            raise ValueError(f"context_src missing but use_context=True for scene_id={rec.scene_id}")
+            raise ValueError(
+                f"context_src missing but use_context=True for scene_id={rec.scene_id}"
+            )
 
-        # Read
-        pan_hw = self._pan_window_float01(rec)            # (H,W) float32
-        gt_hw = self._gt_window_int(rec)                  # (H,W) int64
+        pan_hw = self._pan_window_float01(rec)
+        gt_hw = self._gt_window_int(rec)
 
-        # To tensors
-        tile_t = torch.from_numpy(pan_hw).unsqueeze(0)    # [1,H,W]
+        tile_t = torch.from_numpy(pan_hw).unsqueeze(0)
         tile_t = self._to_channels(tile_t, int(self.cfg.tile_out_channels))
 
-        mask_t = torch.from_numpy(gt_hw)                  # [H,W] int64
+        mask_t = torch.from_numpy(gt_hw)
 
-        # Optional transforms
         if self.tile_transform is not None:
             tile_t = self.tile_transform(tile_t)
 
         ctx_t: Optional[torch.Tensor] = None
+
         if self.cfg.use_context:
             ctx_t = self._context_float01(rec)
-            _, H, W = tile_t.shape
-            ctx_t = self._resize_context_to_tile(ctx_t, H, W)  # [C,H,W]
+            _, height, width = tile_t.shape
+            ctx_t = self._resize_context_to_tile(ctx_t, height, width)
+
             if self.context_transform is not None:
                 ctx_t = self.context_transform(ctx_t)
 
-        # Augmentations (geom sync between tile/mask/context)
         if self.cfg.do_aug:
-            tile_t, mask_t, ctx_t = self._geom_augment_sync(tile_t, mask_t, ctx_t)
+            tile_t, mask_t, ctx_t = self._geom_augment_sync(
+                tile_t=tile_t,
+                mask_t=mask_t,
+                ctx_t=ctx_t,
+                aug_flip=self.cfg.aug_flip,
+                aug_rot90=self.cfg.aug_rot90,
+            )
 
             if self.cfg.aug_noise_std > 0.0:
                 noise = torch.randn_like(tile_t) * float(self.cfg.aug_noise_std)
                 tile_t = torch.clamp(tile_t + noise, 0.0, 1.0)
 
-        meta = self._build_meta(rec)
-
         out: Dict[str, Any] = {
-            "tile_tensor": tile_t,
-            "mask": mask_t,
-            "meta": meta,
+            "tile_tensor": tile_t.contiguous(),
+            "mask": mask_t.long().contiguous(),
+            "meta": self._build_meta(rec),
         }
+
         if ctx_t is not None:
-            out["context_tensor"] = ctx_t
+            out["context_tensor"] = ctx_t.contiguous()
+
         return out
 
-    def _build_meta(self, rec: TileRecord) -> Dict[str, Any]:
-        # Keep meta lightweight; training can log more if needed
+    @staticmethod
+    def _build_meta(rec: TileRecord) -> Dict[str, Any]:
         return {
             "scene_id": rec.scene_id,
             "image_src": str(rec.image_src),
@@ -210,26 +223,27 @@ class BuildingSegWithContextDataset(BaseRasterTileDataset):
 
     @staticmethod
     def _geom_augment_sync(
-        tile_t: torch.Tensor,              # [C,H,W]
-        mask_t: torch.Tensor,              # [H,W]
-        ctx_t: Optional[torch.Tensor],     # [C,h,w] or None
+        *,
+        tile_t: torch.Tensor,
+        mask_t: torch.Tensor,
+        ctx_t: Optional[torch.Tensor],
+        aug_flip: bool,
+        aug_rot90: bool,
     ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
-        # Horizontal flip
-        if np.random.rand() < 0.5:
-            tile_t = torch.flip(tile_t, dims=[2])
-            mask_t = torch.flip(mask_t, dims=[1])
-            if ctx_t is not None:
-                ctx_t = torch.flip(ctx_t, dims=[2])
+        if aug_flip:
+            if np.random.rand() < 0.5:
+                tile_t = torch.flip(tile_t, dims=[2])
+                mask_t = torch.flip(mask_t, dims=[1])
+                if ctx_t is not None:
+                    ctx_t = torch.flip(ctx_t, dims=[2])
 
-        # Vertical flip
-        if np.random.rand() < 0.5:
-            tile_t = torch.flip(tile_t, dims=[1])
-            mask_t = torch.flip(mask_t, dims=[0])
-            if ctx_t is not None:
-                ctx_t = torch.flip(ctx_t, dims=[1])
+            if np.random.rand() < 0.5:
+                tile_t = torch.flip(tile_t, dims=[1])
+                mask_t = torch.flip(mask_t, dims=[0])
+                if ctx_t is not None:
+                    ctx_t = torch.flip(ctx_t, dims=[1])
 
-        # Rot90
-        if np.random.rand() < 0.5:
+        if aug_rot90 and np.random.rand() < 0.5:
             k = int(np.random.randint(0, 4))
             if k:
                 tile_t = torch.rot90(tile_t, k, dims=[1, 2])
@@ -238,3 +252,4 @@ class BuildingSegWithContextDataset(BaseRasterTileDataset):
                     ctx_t = torch.rot90(ctx_t, k, dims=[1, 2])
 
         return tile_t, mask_t, ctx_t
+    

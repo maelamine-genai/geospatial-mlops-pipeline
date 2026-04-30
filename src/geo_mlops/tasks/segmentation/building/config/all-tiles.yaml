@@ -1,0 +1,123 @@
+task: building_seg
+
+tiling:
+  engine:
+    pan_dirname: PAN
+    gt_dirname: GT-Mask
+    context_dirname: Context
+    target_size_m: 100.0
+    overlap: 0.5
+    reflectance_max: 10000
+    context_max_side_cap: null
+    verbose: false
+    skip_tiles_with_nodata: true
+
+  adapter:
+    class_of_interest_id: 1
+    shadow_id: 2
+    emit_shadow: true
+    min_change_pixels: 1
+
+  policy:
+    kind: all
+
+  meta:
+    csv_name_default: building_tiles_all.csv
+
+splitting:
+  stage:
+    seed: 1337
+    splits:
+      train: 0.5
+      val: 0.5
+
+  grouping:
+    group_col: region
+
+  stratification:
+    kind: binned_group_metric
+    group_metric:
+    mode: presence_frac
+    source_col: building_ratio
+    presence_eps: 0.001
+    bins: [0.0, 0.05, 0.2, 0.6, 1.0]
+
+  outputs:
+    prefix: tiles
+    group_list_prefix: regions
+
+training:
+  engine:
+    batch_size: 8
+    num_workers: 4
+    epochs: 20
+    lr: 0.0001
+    seed: 1337
+    selection_metric: val/micro_f1
+    selection_mode: max
+
+  dataset:
+    reflectance_max: 10000
+    use_context: true
+    tile_out_channels: 1
+    context_out_channels: 1
+    cache_context: true
+    context_cache_max_items: 256
+    do_aug: true
+    aug_flip: true
+    aug_rot90: true
+    aug_noise_std: 0.0
+
+  model:
+    add_coords: true
+    expect_ctx: true
+    tile_channels: 1
+    ctx_channels: 1
+    backbone:
+      base_name: nvidia/segformer-b0-finetuned-ade-512-512
+      num_classes: 1
+      image_size: 512
+
+  loss:
+    kind: bce
+    foreground_label: 1
+    pos_weight: null
+
+  metrics:
+    threshold: 0.5
+    foreground_label: 1
+    eps: 0.0000001
+
+evaluation:
+  batch_size: 8
+  num_workers: 4
+  threshold: 0.5
+  partition: val
+
+gating:
+  gate_a:
+    input: val
+    decision_metric_scope: validation
+    checks:
+      - metric: micro_f1
+        scope: micro
+        comparator: ">="
+        threshold: 0.75
+
+  gate_b:
+    input: golden_test
+    decision_metric_scope: golden_test
+    checks:
+      - metric: micro_f1
+        scope: micro
+        comparator: ">="
+        threshold: 0.78
+      - metric: macro_f1
+        scope: macro
+        comparator: ">="
+        threshold: 0.70
+
+registry:
+  model_name: building-seg
+  candidate_alias: candidate
+  production_alias: production
