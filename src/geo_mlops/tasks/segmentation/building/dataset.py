@@ -9,7 +9,7 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 
-from geo_mlops.core.dataset.base import BaseRasterTileDataset, TileRecord
+from geo_mlops.core.data.base import BaseRasterTileDataset, TileRecord
 
 
 @dataclass(frozen=True)

@@ -9,7 +9,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from geo_mlops.core.contracts.train_contract import TrainInputs, TrainOutputs
-from geo_mlops.core.utils.utils import seed_everything
+from geo_mlops.core.utils.random import seed_everything
 
 
 @dataclass(frozen=True)
