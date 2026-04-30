@@ -8,8 +8,8 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from geo_mlops.models.evals import _iou_binary
-from geo_mlops.core.utils.utils import _seed_everything
+from geo_mlops.core.evaluation.engine import _iou_binary
+from geo_mlops.core.utils.random import _seed_everything
 from geo_mlops.tasks.segmentation.building.dataset import (
     BuildingSegConfig,
     BuildingSegWithContextDataset,
