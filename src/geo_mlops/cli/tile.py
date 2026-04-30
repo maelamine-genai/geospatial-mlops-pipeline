@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--dataset-buckets",
         nargs="+",
-        required=True,
+        default=None,
         help="One or more dataset bucket names under --dataset-root.",
     )
     ap.add_argument(

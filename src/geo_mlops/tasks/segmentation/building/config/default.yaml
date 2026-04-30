@@ -24,10 +24,6 @@ tiling:
     require_presence: true
     details_prefix: presence__
 
-  dataset_buckets:
-  - SN2_buildings_train_AOI_3_Paris
-  - SN2_buildings_train_AOI_5_Khartoum
-
   meta:
     csv_name_default: building_tiles_regular.csv
 

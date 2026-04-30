@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 from tqdm import tqdm
@@ -91,23 +91,36 @@ def _sort_master(
 
 def _resolve_dataset_roots(
     dataset_root: Path,
-    dataset_buckets: Sequence[str],
+    dataset_buckets: Optional[Sequence[str]],
 ) -> List[Path]:
     root = Path(dataset_root)
 
     if not root.exists():
         raise FileNotFoundError(f"dataset_root does not exist: {root}")
 
-    if not dataset_buckets:
-        raise ValueError("dataset_buckets must contain at least one bucket name.")
+    if not root.is_dir():
+        raise NotADirectoryError(f"dataset_root is not a directory: {root}")
 
-    roots = [root / bucket for bucket in dataset_buckets]
+    if dataset_buckets is None:
+        roots = [p for p in sorted(root.iterdir()) if p.is_dir()]
+    else:
+        roots = [root / str(bucket) for bucket in dataset_buckets]
+
+    if not roots:
+        raise ValueError(f"No dataset bucket directories found under: {root}")
 
     missing = [p for p in roots if not p.exists()]
     if missing:
         raise FileNotFoundError(
             "Missing dataset bucket directory/directories: "
             + ", ".join(str(p) for p in missing)
+        )
+
+    not_dirs = [p for p in roots if not p.is_dir()]
+    if not_dirs:
+        raise NotADirectoryError(
+            "Dataset bucket path(s) are not directories: "
+            + ", ".join(str(p) for p in not_dirs)
         )
 
     return roots
@@ -214,15 +227,16 @@ def scan_root(
 
 def scan_datasets(
     dataset_root: Path,
-    dataset_buckets: Sequence[str],
+    dataset_buckets: Optional[Sequence[str]],
     regions: Optional[Sequence[str]],
     engine: RoiTilingEngine,
     csv_name: str,
     *,
     force: bool,
     verbose: bool,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, List[str]]:
     roots = _resolve_dataset_roots(dataset_root, dataset_buckets)
+    resolved_bucket_names = [root.name for root in roots]
 
     dfs: List[pd.DataFrame] = []
 
@@ -245,9 +259,9 @@ def scan_datasets(
     non_empty = [df for df in dfs if not df.empty]
 
     if not non_empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), resolved_bucket_names
 
-    return _sort_master(pd.concat(non_empty, ignore_index=True))
+    return _sort_master(pd.concat(non_empty, ignore_index=True)), resolved_bucket_names
 
 
 def _as_plain_dict(obj: Any) -> Dict[str, Any]:
@@ -268,7 +282,7 @@ def run_tiling_stage(
     task: str,
     task_cfg_path: Path,
     dataset_root: Path,
-    dataset_buckets: Sequence[str],
+    dataset_buckets: Optional[Sequence[str]],
     regions: Optional[Sequence[str]],
     csv_name: str,
     out_dir: Path,
@@ -290,7 +304,7 @@ def run_tiling_stage(
         policy=policy,
     )
 
-    df = scan_datasets(
+    df, resolved_dataset_buckets = scan_datasets(
         dataset_root=Path(dataset_root),
         dataset_buckets=dataset_buckets,
         regions=regions,
@@ -314,7 +328,7 @@ def run_tiling_stage(
         schema_version=TILES_SCHEMA_VERSION_V1,
         task=task,
         datasets_root=Path(dataset_root),
-        dataset_buckets=list(dataset_buckets),
+        dataset_buckets=resolved_dataset_buckets,
         regions=list(regions) if regions is not None else None,
         engine_cfg=_as_plain_dict(engine_cfg),
         adapter={
@@ -330,6 +344,7 @@ def run_tiling_stage(
         meta={
             **meta,
             "task_cfg_path": str(task_cfg_path),
+            "dataset_buckets_source": "cli" if dataset_buckets is not None else "discovered_from_dataset_root",
         },
     )
 
