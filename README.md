@@ -1,282 +1,443 @@
 # Geospatial MLOps Pipeline
 
-> Production-grade, contract-driven MLOps framework for building, validating, and promoting machine learning models at scale.
-> Designed to simulate real-world ML production systems with automated validation, promotion, and reproducible pipelines.
----
+**A contract-driven MLOps framework for geospatial machine learning: raw imagery → tiling → deterministic splits → training → validation gate → MLflow candidate registration → full-scene golden evaluation → release gate → production promotion.**
 
-## 🚀 Why This Project Exists
+This repository demonstrates how a remote-sensing ML workflow can be made reproducible, auditable, extensible, and production-oriented. The current reference task is **building segmentation**, but the pipeline itself is task-agnostic: task plugins define domain-specific data loading, model construction, metrics, and evaluation semantics while the core pipeline owns orchestration, contracts, gates, tracking, and registry transitions.
 
-Modern ML systems rarely fail because of model architecture — they fail because of:
-
-- ❌ Non-reproducible data pipelines  
-- ❌ Leakage between training and evaluation  
-- ❌ Manual and subjective model promotion  
-- ❌ Lack of standardized evaluation  
-- ❌ Poor integration between research and production  
-
-This repository addresses these challenges by providing a **production-grade ML lifecycle system** that enforces:
-
-- Deterministic data and feature pipelines  
-- Reproducible training and evaluation  
-- Automated, metric-driven model promotion  
-- Scalable orchestration using Kubernetes-native workflows  
-
-> Originally designed for geospatial ML, but built as a **task-agnostic ML platform**.
-
-At the core of this system is a contract-driven architecture that ensures reproducibility, auditability, and decoupling across all pipeline stages.
+> Built for geospatial ML, but designed like a general ML platform: task plugins change, lifecycle contracts stay stable.
 
 ---
 
-## ⚡ System in Action
+## System in Action
 
-### 📈 Experiment Tracking (MLflow)
+This project is not just a training script. It implements a full ML lifecycle with experiment tracking, model registry transitions, validation gates, golden-set evaluation, and an orchestration-ready structure.
 
-> Example of experiment tracking and metric evolution across multiple training runs.
+### Experiment Tracking with MLflow
+
+Training logs metrics, parameters, artifacts, checkpoints, and model lineage to MLflow.
+
 ![MLflow Runs](./docs/mlflow_runs.png)
+
 ![MLflow Metrics](./docs/mlflow_metrics.png)
 
-- Tracks experiments, metrics, and artifacts  
-- Enables reproducibility and comparison  
-- Logs full lineage across pipeline stages  
+MLflow is used to track:
+
+- training and validation metrics
+- model checkpoints and MLflow model artifacts
+- task configuration and runtime parameters
+- lineage between pipeline stages
+- candidate and production model versions
 
 ---
 
-### 📦 Model Registry & Versioning
-> Versioned model promotion workflow showing candidate → production transitions.
+### Model Registry and Promotion
+
+After validation gates pass, the trained model is registered as a candidate. After golden-set evaluation and release gates pass, the same model version is promoted to production.
+
 ![MLflow Registry](./docs/model_registry.png)
 
-- Versioned models  
-- Candidate vs production separation  
-- Promotion workflow with audit trail  
-- Produces deployment-ready artifacts suitable for integration into real-time or batch inference systems
-
----
-
-### 🧩 Pipeline Orchestration (Argo)
-> Full pipeline execution DAG orchestrated via Argo, including gating and promotion steps.
-![Argo](./docs/Argo.png)
-
-- DAG-based execution  
-- Containerized tasks  
-- Kubernetes-native orchestration  
-- Supports large-scale distributed workflows  
-
-> The pipeline enforces strict validation gates — runs that fail performance thresholds are automatically rejected and never promoted.
-
----
-
-## 🧪 Example Workflow
-
-1. Generate dataset tiles from raw imagery  
-2. Create deterministic splits (`split.json`)  
-3. Train model (e.g., SegFormer)  
-4. Log metrics and artifacts to MLflow  
-5. Apply Gate A → select candidate model  
-6. Evaluate on golden test set  
-7. Apply Gate B → enforce release thresholds  
-8. Register model in MLflow  
-9. Promote to production-ready version  
-
-> Supports **multi-run experimentation, automated promotion, and full lineage tracking**.
-
----
-
-## 🔄 End-to-End ML Lifecycle
-
-This system implements a full production ML lifecycle:
-
-1. **Data/Feature Engineering** (Tiling + Dataset Contracts)  
-2. **Dataset Splitting** (Leakage-aware, reproducible)  
-3. **Training** (Containerized, scalable)  
-4. **Validation (Gate A)** (Candidate selection)  
-5. **Evaluation (Golden Test)** (True performance measurement)  
-6. **Release Decision (Gate B)** (Automated promotion criteria)  
-7. **Model Registry & Promotion**  
-
-Each stage produces **versioned artifacts**, enabling full lineage and reproducibility.
-This framework enables seamless transition from research experiments to production-ready systems by standardizing interfaces between data science and infrastructure layers.
-
----
-
-## 🏗️ High-Level Architecture
-
-![Architecture](./docs/mermaid-diagram-architecture.png)
-
-*Figure: End-to-end ML system architecture from raw data to production-ready models*
-
----
-
-## ⚙️ Pipeline Stages
-
-### 1. DataOps & Feature Pipeline
-- Converts raw geospatial data into structured datasets  
-- Generates tiles and metadata  
-- Creates **train / validation / test splits**  
-- Prevents data leakage  
-- Acts as a **feature engineering pipeline**
-
----
-
-### 2. Training
-- Fully containerized execution  
-- Consumes immutable dataset contracts  
-- Logs metrics, artifacts, and lineage to MLflow  
-
----
-
-### 3. Validation (Gate A)
-- Evaluates models on validation data  
-- Selects best-performing candidate  
-- Ensures fair experiment comparison  
-
----
-
-### 4. Evaluation (Golden Test)
-- Runs on strictly held-out dataset  
-- Measures real-world performance  
-- Produces auditable evaluation artifacts  
-
----
-
-### 5. Model Validation & Release (Gate B)
-- Converts evaluation metrics into pass/fail decisions  
-- Prevents regressions  
-- Enforces production-quality thresholds  
-
----
-
-### 6. Model Registry & Promotion
-- Registers approved models in MLflow  
-- Tracks versions and aliases (candidate, production)  
-- Produces **deployment-ready artifacts**
-
----
-
-## 🧩 Core Design Principles
-
-### 🔒 Contract-Based Architecture
-
-![Contracts](./docs/mermaid-diagram-contracts.png)
-
-Each stage communicates via structured contracts:
-
-- `tiles_manifest.json`
-- `split.json`
-- `eval.json`
-- `gate.json`
-
 This enables:
-- Reproducibility  
-- Auditability  
-- Loose coupling between stages  
+
+- versioned model registration
+- candidate vs production separation
+- auditable promotion decisions
+- repeatable model release criteria
+- deployment-ready model artifacts
 
 ---
 
-### 🔄 Deterministic Pipelines
-- Same input → same output  
-- Fully reproducible across environments  
-- Containerized execution  
+### Orchestration-Ready Pipeline
+
+The repo is structured so the same stage boundaries can run locally through CLI commands or be mapped to Kubernetes-native workflow orchestration such as Argo Workflows.
+
+![Argo Workflow](./docs/Argo.png)
+
+The pipeline enforces strict validation gates: models that fail KPI thresholds are rejected and are not promoted.
 
 ---
 
-### 🧪 Separation of Concerns
+## Why This Project Exists
 
-| Stage | Responsibility |
-|------|--------|
-| Validation (Gate A) | Candidate selection |
-| Evaluation | Performance measurement |
-| Gate B | Production readiness decision |
+Modern ML systems rarely fail only because of model architecture. They fail because of:
 
----
+- non-reproducible data pipelines
+- leakage between training and validation data
+- inconsistent golden-set evaluation
+- manual and subjective model promotion
+- weak lineage between datasets, metrics, checkpoints, and release decisions
+- poor separation between research code and production lifecycle logic
 
-### 🚦 Automated Model Validation
+This repo addresses those issues with one core rule:
 
-![Gating](./docs/mermaid-diagram-gating.png)
+> Every stage emits a contract. Every downstream stage consumes a contract.
 
-- Objective, metric-driven decisions  
-- Eliminates manual bias  
-- Prevents performance regressions  
+That makes the workflow inspectable and production-oriented:
 
-> This mirrors real-world ML systems where models must pass strict validation before deployment.
-
----
-
-## 🏗️ MLOps Stack
-
-- **Orchestration:** Argo Workflows  
-- **Distributed Training:** Ray / KubeRay  
-- **Experiment Tracking:** MLflow  
-- **CI/CD:** GitLab CI  
-- **Infrastructure:** Kubernetes  
+- **Data lineage:** each stage records upstream artifacts and configuration.
+- **Reproducibility:** tiling, splitting, training, gates, and evaluation are deterministic where possible.
+- **Model governance:** models are promoted only after passing explicit KPI gates.
+- **Task extensibility:** new geospatial ML tasks plug into the same lifecycle through a task registry.
+- **Operational readiness:** MLflow tracking/registry are integrated, and the design is ready for Argo/Ray scale-out.
 
 ---
 
-## ⚡ Scalability & Performance
+## End-to-End Pipeline
 
-- Distributed training via Ray  
-- Kubernetes-native execution  
-- Parallel experimentation  
-- Efficient processing of large-scale datasets  
+![End-to-end pipeline](docs/diagrams/pipeline_lifecycle.png)
 
----
+The current workflow is:
 
-## 🧩 Extensible ML Platform
-
-This framework is **task-agnostic**:
-
-- Task adapters define domain-specific logic  
-- Core pipeline remains unchanged  
-- New ML tasks plug into the same lifecycle  
-
-Supports:
-- Segmentation  
-- Classification  
-- Detection  
-- Future generative workflows  
-
----
-
-## 💡 What This Project Demonstrates
-
-- End-to-end ML lifecycle ownership  
-- Production-grade MLOps system design  
-- Scalable pipeline orchestration  
-- Strong separation between research and production  
-- Reproducibility and model governance  
-
----
-
-## 📁 Repository Structure
-
-```bash
-core/
-  contracts/        # Data and evaluation contracts
-  tiling/           # Tiling engine and policies
-  data/             # Dataset and splitting logic
-  train/            # Training engine
-
-tasks/
-  segmentation/
-    building/
-    water/
-
-cli/
-  generate_tiles.py
-  make_splits.py
-  train.py
-  evaluate.py
-
+```text
+raw geospatial imagery
+  -> tile generation
+  -> deterministic split
+  -> training + validation monitoring
+  -> Gate A
+  -> MLflow candidate registration
+  -> full-scene golden evaluation
+  -> Gate B
+  -> MLflow production promotion
 ```
 
-----
+The pipeline can be run through one command:
 
-## 🔮 Future Work
-- Automated retraining and drift detection
-- Online inference and monitoring
-- Feature store integration
-- Cross-modal generative pipelines
+```bash
+python -m geo_mlops.cli.run_pipeline \
+  --task building_seg \
+  --task-cfg src/geo_mlops/tasks/segmentation/building/config/default.yaml \
+  --dataset-root /path/to/train_val_dataset_root \
+  --golden-root /path/to/golden_full_scene_dataset_root \
+  --run-dir /path/to/output/run \
+  --csv-name bldg_tiles_regular.csv \
+  --mlflow \
+  --mlflow-tracking-uri http://127.0.0.1:5000 \
+  --mlflow-experiment building_seg_debug \
+  --force-tiling
+```
+
+The pipeline writes a complete run directory:
+
+```text
+run/
+  tiles/
+    tiles_manifest.json
+    building_seg_tiles_master.csv
+
+  split/
+    split.json
+    group_stats.csv
+
+  train/
+    model.pt
+    metrics.json
+    train_manifest.json
+
+  gate_a/
+    gate_decision.json
+
+  registry_candidate/
+    registry_result.json
+
+  golden_eval/
+    eval_summary.json
+    eval_manifest.json
+    predictions/
+      probabilities/
+      masks/
+    tables/
+      per_scene_metrics.csv
+      building_per_image_metrics.csv
+      building_pareto_images.csv
+
+  gate_b/
+    gate_decision.json
+
+  registry_production/
+    registry_result.json
+```
 
 ---
 
-## 🤝 Contributions
-This project is designed to be modular and extensible. Contributions are welcome.
+## Pipeline Stages
+
+| Stage | CLI | Core package | Main artifact | Purpose |
+|---|---|---|---|---|
+| Tile generation | `geo_mlops.cli.tile` | `core/tiling` | `tiles_manifest.json` | Discover scenes/ROIs and emit all valid tile records with policy annotations. |
+| Split | `geo_mlops.cli.split` | `core/splitting` | `split.json` | Create deterministic group-aware train/validation splits. |
+| Training | `geo_mlops.cli.train` | `core/training` | `train_manifest.json`, `metrics.json`, `model.pt` | Train task model, validate during training, log metrics/artifacts to MLflow. |
+| Gate A | `geo_mlops.cli.gate` | `core/gating` | `gate_decision.json` | Decide whether validation metrics qualify the model as a candidate. |
+| Candidate registry | `geo_mlops.cli.register` | `core/registry` | `registry_result.json` | Register the MLflow model version and assign candidate metadata/alias. |
+| Golden evaluation | `geo_mlops.cli.evaluate` | `core/evaluation` | `eval_summary.json`, prediction rasters | Run full-scene sliding-window inference on the golden set. |
+| Gate B | `geo_mlops.cli.gate` | `core/gating` | `gate_decision.json` | Decide whether golden-set metrics meet release KPIs. |
+| Production promotion | `geo_mlops.cli.register` | `core/registry` | `registry_result.json` | Promote the approved candidate model to production. |
+
+---
+
+## Architecture
+
+![Core/plugin architecture](docs/diagrams/core_plugin_architecture.png)
+
+The repository is split into four layers:
+
+```text
+src/geo_mlops/
+  cli/      # thin user-facing command wrappers
+  core/     # task-agnostic engines, contracts, IO, gates, registry, orchestration logic
+  models/   # reusable neural architecture components
+  tasks/    # task plugins that define task-specific semantics
+```
+
+The most important boundary is:
+
+- **Core** does not know what a building is, what a foreground label is, or how a task-specific metric should be computed.
+- **Tasks** provide adapters for tiling, datasets, model/loss/metrics, full-scene evaluation, and artifact writing.
+
+This enables the same MLOps lifecycle to support segmentation, classification, detection, self-supervised tasks, or future generative workflows.
+
+---
+
+## Contract-Driven Design
+
+![Contract flow](docs/diagrams/contracts_flow.png)
+
+Every stage writes a machine-readable contract.
+
+| Contract | Producer | Consumer | Why it matters |
+|---|---|---|---|
+| `tiles_manifest.json` | tiling | splitting/training | Captures dataset root, task, tiling config, master CSV path, adapter/policy metadata. |
+| `split.json` | splitting | training | Captures group-aware train/validation split and split metadata. |
+| `train_manifest.json` | training | Gate A / registry / evaluation | Captures checkpoint path, metrics path, upstream data, MLflow run metadata. |
+| `gate_decision.json` | gating | registry / pipeline orchestrator | Captures pass/fail decision, thresholds, actual values, and warnings. |
+| `eval_summary.json` | golden evaluation | Gate B | Captures full-scene micro/macro metrics and artifact pointers. |
+| `registry_result.json` | registry | pipeline orchestrator | Captures model version registered/promoted in MLflow. |
+
+This contract-based architecture gives the pipeline:
+
+- reproducibility
+- auditability
+- loose coupling between stages
+- explicit stage boundaries
+- easier local debugging and future distributed orchestration
+
+---
+
+## Golden Evaluation Is Full-Scene Evaluation
+
+Training uses tiles. Golden evaluation does not.
+
+![Golden evaluation](docs/diagrams/golden_evaluation.png)
+
+The golden evaluation stage loads full ROI images, runs sliding-window inference, stitches full-scene probability masks, saves full-scene binary masks, and computes metrics at both dataset and image levels.
+
+This is important because golden evaluation should mimic production inference, not validation-time tile sampling.
+
+Golden evaluation produces:
+
+```text
+golden_eval/
+  eval_summary.json
+  eval_manifest.json
+  predictions/
+    probabilities/
+    masks/
+  tables/
+    per_scene_metrics.csv
+    building_per_image_metrics.csv
+    building_pareto_images.csv
+```
+
+The evaluation summary contains gate-ready metrics:
+
+```json
+{
+  "metrics": {
+    "micro": {
+      "precision": 0.74,
+      "recall": 0.19,
+      "f1": 0.30,
+      "iou": 0.18,
+      "pixel_accuracy": 0.85
+    },
+    "macro": {
+      "precision": 0.60,
+      "recall": 0.16,
+      "f1": 0.24,
+      "iou": 0.14,
+      "pixel_accuracy": 0.85
+    }
+  }
+}
+```
+
+---
+
+## MLflow Tracking and Model Governance
+
+![MLflow promotion lifecycle](docs/diagrams/mlflow_promotion.png)
+
+The pipeline separates model tracking from model promotion:
+
+1. Training logs the model and metrics to MLflow.
+2. Gate A decides whether validation metrics qualify the model as a candidate.
+3. The registry step registers the model as a candidate version.
+4. Golden evaluation measures full-scene performance.
+5. Gate B decides whether the model meets release KPIs.
+6. The registry step promotes the approved model to production.
+
+This mirrors production ML workflows where models must pass explicit validation criteria before deployment.
+
+---
+
+## Reference Task: Building Segmentation
+
+The current reference task is `building_seg`.
+
+```text
+tasks/segmentation/building/
+  config/             # default, all-tiles, hard-mining configs
+  data/               # tile dataset and train/val dataset construction
+  evaluation/         # full-scene eval scene discovery/loading/writing
+  modeling/           # model factory, forward adapter, losses, metrics
+  tiling/             # task adapter and tiling component factory
+  task.py             # public task plugin facade
+```
+
+The building task currently supports:
+
+- PAN/context inputs
+- SegFormer-style model construction
+- tile-level training with optional policy-based sampling
+- validation metrics during training
+- full-scene golden evaluation with probability/mask raster outputs
+- micro and macro building segmentation metrics
+- Pareto/hardest-image analytics tables
+- MLflow model logging and registry promotion
+
+---
+
+## Local MLflow Server
+
+For local development:
+
+```bash
+mkdir -p /tmp/geo_mlops_mlruns
+
+mlflow server \
+  --backend-store-uri sqlite:////tmp/geo_mlops_mlflow.db \
+  --default-artifact-root /tmp/geo_mlops_mlruns \
+  --host 127.0.0.1 \
+  --port 5000
+```
+
+Then run the pipeline with:
+
+```bash
+--mlflow --mlflow-tracking-uri http://127.0.0.1:5000
+```
+
+---
+
+## Repository Structure
+
+```text
+src/geo_mlops/
+  cli/
+    tile.py
+    split.py
+    train.py
+    gate.py
+    register.py
+    evaluate.py
+    run_pipeline.py
+
+  core/
+    config/
+    contracts/
+    dataset/
+    evaluation/
+    gating/
+    io/
+    registry/
+    splitting/
+    tiling/
+    training/
+    utils/
+
+  models/
+    backbones/
+    fusion/
+
+  tasks/
+    segmentation/
+      segmentation_adapter.py
+      building/
+        config/
+        data/
+        evaluation/
+        modeling/
+        tiling/
+        task.py
+```
+
+---
+
+## What This Project Demonstrates
+
+This repository demonstrates:
+
+- end-to-end ML lifecycle ownership
+- geospatial data preparation and full-scene inference
+- contract-driven MLOps architecture
+- task-agnostic plugin design
+- MLflow experiment tracking and model registry
+- automated KPI gates for model promotion
+- reproducible training/evaluation artifacts
+- separation between research code and production lifecycle code
+- orchestration-ready stage boundaries for Argo/Ray/Kubernetes
+
+---
+
+## Roadmap
+
+The repo is now ready for higher-leverage extensions:
+
+1. **Distributed golden evaluation with Ray**  
+   Full-scene inference is embarrassingly parallel and is the best first scale-out target.
+
+2. **Ray/KubeRay training and sweeps**  
+   Add distributed sweeps and training backends while keeping the same contracts.
+
+3. **Argo workflow templates**  
+   Map each CLI stage to a Kubernetes-native DAG step.
+
+4. **ROI analysis and data recommendation**  
+   Use embeddings and evaluation outputs to identify underrepresented geospatial modes.
+
+5. **Second task plugin**  
+   Add water/cloud/change detection to prove the task-agnostic interface.
+
+6. **Self-supervised and generative task families**  
+   Extend the same lifecycle to representation learning or image synthesis tasks.
+
+---
+
+## Documentation
+
+- [Pipeline Walkthrough](docs/pipeline_walkthrough.md)
+- [Architecture](docs/architecture.md)
+- [Contracts](docs/contracts.md)
+- [Task Plugins](docs/task_plugins.md)
+- [MLflow and Registry](docs/mlflow_registry.md)
+- [Roadmap](docs/roadmap.md)
+
+---
+
+## Status
+
+The current implementation supports a complete local lifecycle for the building segmentation reference task:
+
+```text
+tile -> split -> train -> gate_a -> register candidate -> evaluate golden -> gate_b -> promote production
+```
+
+The next phase is scale-out: Ray for distributed evaluation/training and Argo for workflow orchestration.
