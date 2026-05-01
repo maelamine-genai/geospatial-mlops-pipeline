@@ -32,3 +32,10 @@ def load_cfg(path: str | Path) -> Dict[str, Any]:
         return yaml.safe_load(p.read_text())
 
     raise ValueError(f"Unsupported config extension '{suffix}'. Use .yaml/.yml or .json.")
+
+
+def require_section(cfg: Dict[str, Any], section: str) -> Dict[str, Any]:
+    value = cfg.get(section)
+    if not isinstance(value, dict):
+        raise ValueError(f"Task config must include a '{section}' mapping.")
+    return value
