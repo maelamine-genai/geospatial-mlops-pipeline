@@ -1,0 +1,6 @@
+flowchart LR
+  A[Training run<br/>metrics + model] --> B[Gate A pass]
+  B --> C[Registered model<br/>candidate alias]
+  C --> D[Golden evaluation]
+  D --> E[Gate B pass]
+  E --> F[Same model version<br/>production alias]

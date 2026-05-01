@@ -1,0 +1,7 @@
+flowchart TB
+  TASK[task.py<br/>public plugin facade]
+  TASK --> TILING[tiling/<br/>adapter + factory]
+  TASK --> DATA[data/<br/>dataset + train_data]
+  TASK --> MODEL[modeling/<br/>factory + forward + loss + metrics]
+  TASK --> EVAL[evaluation/<br/>scene discovery + save hooks]
+  TASK --> CONFIG[config/<br/>unified stage config]

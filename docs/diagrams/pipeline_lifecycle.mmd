@@ -1,0 +1,11 @@
+flowchart LR
+  A[Raw imagery<br/>train/val root] --> B[Tiling<br/>tiles_manifest.json]
+  B --> C[Split<br/>split.json]
+  C --> D[Training + validation<br/>metrics.json + train_manifest.json]
+  D --> E[Gate A<br/>validation KPIs]
+  E --> F[MLflow candidate<br/>registry_result.json]
+  F --> G[Golden full-scene evaluation<br/>sliding-window inference]
+  G --> H[Gate B<br/>golden KPIs]
+  H --> I[MLflow production<br/>promoted model version]
+  D -. metrics/artifacts/model .-> M[MLflow Tracking]
+  M -. registered model .-> F

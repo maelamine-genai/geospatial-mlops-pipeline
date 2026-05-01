@@ -1,0 +1,8 @@
+flowchart LR
+  A[Golden root<br/>full scenes] --> B[Task scene loader<br/>PAN + GT + context]
+  B --> C[Sliding windows]
+  C --> D[Model inference]
+  D --> E[Stitch full-scene probability map]
+  E --> F[Save probability + binary mask rasters]
+  F --> G[Task metric accumulator<br/>micro + macro + pareto]
+  G --> H[eval_summary.json<br/>eval_manifest.json]

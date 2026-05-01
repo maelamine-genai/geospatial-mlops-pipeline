@@ -1,0 +1,7 @@
+flowchart TB
+  CLI[CLI<br/>thin wrappers] --> CORE[Core engines<br/>contracts, IO, tiling, splitting, training, evaluation, gates, registry]
+  CORE --> REG[Task registry]
+  REG --> TASK[Task plugin<br/>building_seg]
+  TASK --> MODELS[Reusable models<br/>backbones + fusion]
+  CORE --> MLFLOW[MLflow<br/>tracking + registry]
+  TASK -. hooks/contracts .-> CORE

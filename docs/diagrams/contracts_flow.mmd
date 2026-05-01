@@ -1,0 +1,12 @@
+flowchart LR
+  TM[tiles_manifest.json] --> SJ[split.json]
+  TM --> TR[train_manifest.json]
+  SJ --> TR
+  MET[metrics.json] --> GA[gate_a/gate_decision.json]
+  TR --> GA
+  GA --> RRC[registry_candidate/registry_result.json]
+  TR --> ES[eval_summary.json]
+  ES --> GB[gate_b/gate_decision.json]
+  EM[eval_manifest.json] --> GB
+  RRC --> RRP[registry_production/registry_result.json]
+  GB --> RRP
