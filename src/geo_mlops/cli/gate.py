@@ -20,7 +20,8 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--gate-name", required=True, help="Gate name, e.g. gate_a or gate_b")
 
     p.add_argument(
-        "--gate-config",
+        "--task-cfg",
+        "--task_cfg",
         required=True,
         help="Path to gate config YAML/JSON containing threshold spec.",
     )
@@ -71,23 +72,22 @@ def _load_structured_file(path: str | Path) -> Dict[str, Any]:
     return obj
 
 
-def _extract_threshold_spec(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Accept either:
-      1) raw threshold spec at root:
-         {fail_on_missing: true, checks: [...]}
+def _extract_threshold_spec(
+    cfg: Dict[str, Any],
+    gate_name: str,
+) -> Dict[str, Any]:
+    gating = cfg.get("gating")
+    if not isinstance(gating, dict):
+        raise ValueError("Task config must include a 'gating' mapping.")
 
-      2) nested under 'gate':
-         {gate: {fail_on_missing: true, checks: [...]}}
+    gate_spec = gating.get(gate_name)
+    if not isinstance(gate_spec, dict):
+        raise ValueError(
+            f"Task config missing gating.{gate_name!r}. "
+            f"Available gates: {sorted(gating.keys())}"
+        )
 
-    This keeps the CLI forgiving while the config format stabilizes.
-    """
-    if "gate" in cfg:
-        gate_spec = cfg["gate"]
-        if not isinstance(gate_spec, dict):
-            raise ValueError("Expected 'gate' section in config to be a mapping")
-        return gate_spec
-    return cfg
+    return gate_spec
 
 
 def _build_upstream_dict(args: argparse.Namespace) -> Dict[str, Any]:
@@ -129,14 +129,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    gate_cfg = _load_structured_file(args.gate_config)
-    threshold_spec = _extract_threshold_spec(gate_cfg)
+    task_cfg = _load_structured_file(args.task_cfg)
+    threshold_spec = _extract_threshold_spec(task_cfg, args.gate_name)
 
     metrics = _load_structured_file(args.metrics_file)
     upstream = _build_upstream_dict(args)
     meta = _load_optional_meta(args.meta_json)
-
-    print("XXX")
 
     contract = run_gate(
         gate_dir=out_dir,

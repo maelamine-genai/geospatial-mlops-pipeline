@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Optional, Sequence
 
 from geo_mlops.core.contracts.tile_contract import TILES_MANIFEST_NAME
 from geo_mlops.core.registry.task_registry import get_task
 from geo_mlops.core.tiling.stage import run_tiling_stage
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(
         description=(
             "Generate tile CSVs using a task-agnostic tiling engine "
@@ -78,11 +79,11 @@ def parse_args() -> argparse.Namespace:
         help="Print detailed progress logs.",
     )
 
-    return ap.parse_args()
+    return ap.parse_args(argv)
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = parse_args(argv)
 
     task_plugin = get_task(args.task)
 
@@ -113,6 +114,8 @@ def main() -> None:
     print(f"[manifest] {manifest_path}")
     print("Done.")
 
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

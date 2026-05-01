@@ -5,174 +5,220 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
-import pandas as pd
 import torch
-import yaml
 
-from geo_mlops.core.contracts.eval_contract import (
-    EVAL_SCHEMA_VERSION_V1,
-    EvalContract,
-)
-from geo_mlops.core.io.eval_io import summarize_eval_contract, write_eval_contract
-from geo_mlops.core.io.tile_io import load_tiles_contract
-from geo_mlops.core.evaluation import load_groups_file, run_evaluation
+from geo_mlops.core.config.loader import load_cfg
+from geo_mlops.core.evaluation.engine import run_full_scene_evaluation
+from geo_mlops.core.registry.task_registry import get_task
 
 
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Run evaluation on a held-out split (e.g. golden_test) using a trained model."
+        description=(
+            "Run full-scene sliding-window evaluation on a golden dataset using "
+            "a trained task model."
+        )
     )
 
-    p.add_argument("--task", type=str, required=True, help="Task name, e.g. building_seg")
-    p.add_argument("--tiles-manifest", type=Path, required=True, help="Path to tiles_manifest.json")
-    p.add_argument("--train-manifest", type=Path, required=True, help="Path to train_manifest.json")
-    p.add_argument("--train-cfg", type=Path, required=True, help="Path to training config YAML/JSON")
-
     p.add_argument(
-        "--split-name",
+        "--task",
         type=str,
-        default="golden_test",
-        help="Evaluation split name recorded in metrics/contract.",
+        required=True,
+        help="Task key registered in task_registry, e.g. building_seg.",
     )
     p.add_argument(
-        "--groups-file",
+        "--task-cfg",
+        "--task_cfg",
+        dest="task_cfg",
         type=Path,
         required=True,
-        help="Newline-delimited text file listing the eval groups/regions/scenes.",
+        help="Unified task config YAML/JSON containing training/evaluation sections.",
     )
     p.add_argument(
-        "--group-col",
-        type=str,
-        default="region",
-        help="Column in master CSV used to select eval rows.",
+        "--dataset-root",
+        "--dataset_root",
+        dest="dataset_root",
+        type=Path,
+        required=True,
+        help="Golden evaluation dataset root. This is full-scene based, not tile/split based.",
+    )
+    p.add_argument(
+        "--train-manifest",
+        "--train_manifest",
+        dest="train_manifest",
+        type=Path,
+        default=None,
+        help=(
+            "Optional train_manifest.json. Used to infer checkpoint path when "
+            "--checkpoint is not provided."
+        ),
+    )
+    p.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=None,
+        help="Path to local model checkpoint/state_dict. Overrides train_manifest model_path.",
+    )
+    p.add_argument(
+        "--out-dir",
+        "--out_dir",
+        dest="out_dir",
+        type=Path,
+        required=True,
+        help="Output directory for eval_summary.json, eval_manifest.json, masks, probabilities, and tables.",
     )
 
-    p.add_argument("--out-dir", type=Path, required=True, help="Output directory for evaluation artifacts")
     p.add_argument("--device", type=str, default="cuda")
-    p.add_argument("--num-workers", type=int, default=4)
-    p.add_argument("--batch-size", type=int, default=8)
-    p.add_argument("--seed", type=int, default=1337)
+
+    # Optional eval engine overrides.
+    p.add_argument("--tile-size", type=int, default=None)
+    p.add_argument("--stride", type=int, default=None)
+    p.add_argument("--batch-size", type=int, default=None)
+    p.add_argument("--threshold", type=float, default=None)
+    p.add_argument("--seed", type=int, default=None)
 
     return p
 
 
-def _load_structured_file(path: str | Path) -> Dict[str, Any]:
+def _load_json(path: str | Path) -> Dict[str, Any]:
     p = Path(path)
+
     if not p.exists():
-        raise FileNotFoundError(f"File not found: {p}")
+        raise FileNotFoundError(f"JSON file not found: {p}")
 
-    suffix = p.suffix.lower()
-    text = p.read_text(encoding="utf-8")
-
-    if suffix == ".json":
-        obj = json.loads(text)
-    elif suffix in {".yaml", ".yml"}:
-        obj = yaml.safe_load(text)
-    else:
-        raise ValueError(f"Unsupported file extension '{suffix}' for {p}. Use .json/.yaml/.yml")
+    obj = json.loads(p.read_text())
 
     if not isinstance(obj, dict):
-        raise ValueError(f"Expected mapping/object at root of {p}, got {type(obj)}")
+        raise ValueError(f"Expected JSON object at root of {p}")
 
     return obj
 
 
-def _build_upstream(
+def _resolve_device(device_arg: str) -> torch.device:
+    if device_arg == "cuda" and not torch.cuda.is_available():
+        print("[evaluate] CUDA requested but unavailable; falling back to CPU.")
+        return torch.device("cpu")
+    return torch.device(device_arg)
+
+
+def _resolve_checkpoint(
     *,
-    tiles_manifest: Path,
-    train_manifest: Path,
-    train_cfg: Path,
-) -> Dict[str, Any]:
-    return {
-        "tiles_manifest": str(tiles_manifest),
-        "train_manifest": str(train_manifest),
-        "train_cfg": str(train_cfg),
+    checkpoint: Optional[Path],
+    train_manifest: Optional[Path],
+) -> Path:
+    if checkpoint is not None:
+        return checkpoint
+
+    if train_manifest is None:
+        raise ValueError("Provide --checkpoint or --train-manifest.")
+
+    manifest = _load_json(train_manifest)
+
+    model_path = manifest.get("model_path")
+    if not model_path:
+        raise ValueError(
+            f"train_manifest does not contain model_path: {train_manifest}"
+        )
+
+    return Path(str(model_path))
+
+
+def _load_training_cfg_from_task_cfg(task_cfg_path: Path) -> Dict[str, Any]:
+    cfg = load_cfg(task_cfg_path)
+
+    if not isinstance(cfg, dict):
+        raise ValueError(f"Task config root must be a mapping: {task_cfg_path}")
+
+    training = cfg.get("training")
+    if not isinstance(training, dict):
+        raise ValueError("Task config must include a 'training' mapping.")
+
+    return training
+
+
+def _apply_eval_overrides(eval_engine_cfg, args: argparse.Namespace):
+    """
+    Avoid importing dataclasses.replace unless needed.
+    EvalConfig is frozen, so construct a new one if overrides are present.
+    """
+    updates = {
+        "tile_size": args.tile_size,
+        "stride": args.stride,
+        "batch_size": args.batch_size,
+        "threshold": args.threshold,
+        "seed": args.seed,
     }
 
+    updates = {k: v for k, v in updates.items() if v is not None}
 
-def _print_summary(summary: Dict[str, Any]) -> None:
-    print(
-        f"[eval] task={summary['task']} | split={summary['split_name']} | "
-        f"num_eval_tiles={summary['num_eval_tiles']}"
-    )
-    print(f"[eval] metrics={summary['metrics_path']}")
-    print(f"[eval] model={summary['model_path']}")
-    print(f"[eval] out_dir={summary['eval_dir']}")
+    if not updates:
+        return eval_engine_cfg
+
+    from dataclasses import replace
+
+    return replace(eval_engine_cfg, **updates)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_argparser().parse_args(argv)
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    device = torch.device(args.device if (args.device != "cuda" or torch.cuda.is_available()) else "cpu")
+    device = _resolve_device(args.device)
 
-    # -----------------------------
-    # Load upstream artifacts/configs
-    # -----------------------------
-    tiles = load_tiles_contract(args.tiles_manifest)
-    train_manifest = _load_structured_file(args.train_manifest)
-    train_cfg = _load_structured_file(args.train_cfg)
+    task_plugin = get_task(args.task)
 
-    model_path = Path(train_manifest["model_path"])
-    tiles_df = pd.read_csv(tiles.master_csv)
-    groups = load_groups_file(args.groups_file)
+    eval_cfg = task_plugin.build_evaluation_cfg(args.task_cfg)
+    eval_engine_cfg = task_plugin.build_eval_engine_cfg(eval_cfg)
+    eval_engine_cfg = _apply_eval_overrides(eval_engine_cfg, args)
 
-    # -----------------------------
-    # Run core evaluation engine
-    # -----------------------------
-    outputs = run_evaluation(
-        tiles_df=tiles_df,
-        train_cfg=train_cfg,
-        model_path=model_path,
-        group_col=args.group_col,
-        groups=groups,
-        split_name=args.split_name,
+    train_cfg = _load_training_cfg_from_task_cfg(args.task_cfg)
+
+    checkpoint_path = _resolve_checkpoint(
+        checkpoint=args.checkpoint,
+        train_manifest=args.train_manifest,
+    )
+
+    model = task_plugin.build_model(train_cfg)
+    model = task_plugin.load_checkpoint(
+        model=model,
+        checkpoint_path=checkpoint_path,
         device=device,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        seed=args.seed,
     )
 
-    # -----------------------------
-    # Write metrics artifact
-    # -----------------------------
-    metrics_path = args.out_dir / "metrics.json"
-    metrics_path.write_text(json.dumps(outputs.metrics, indent=2) + "\n", encoding="utf-8")
+    scenes = task_plugin.iter_eval_scenes(
+        dataset_root=args.dataset_root,
+        eval_cfg=eval_cfg,
+    )
 
-    # -----------------------------
-    # Write canonical eval contract
-    # -----------------------------
-    contract = EvalContract(
-        eval_dir=args.out_dir,
-        schema_version=EVAL_SCHEMA_VERSION_V1,
+    outputs = run_full_scene_evaluation(
         task=args.task,
-        split_name=args.split_name,
-        metrics_path=metrics_path,
-        model_path=model_path,
-        num_eval_tiles=int(outputs.num_eval_tiles),
-        group_col=args.group_col,
-        selection_source=args.groups_file,
-        metrics=outputs.metrics,
-        upstream=_build_upstream(
-            tiles_manifest=args.tiles_manifest,
-            train_manifest=args.train_manifest,
-            train_cfg=args.train_cfg,
-        ),
-        meta={
-            "num_groups": len(groups),
-            "groups_preview": groups[:10],
-            "seed": int(args.seed),
-            "device": str(device),
-            "batch_size": int(args.batch_size),
-            "num_workers": int(args.num_workers),
-        },
+        model=model,
+        scenes=scenes,
+        out_dir=args.out_dir,
+        device=device,
+        cfg=eval_engine_cfg,
+        load_scene_fn=lambda scene: task_plugin.load_eval_scene(scene, eval_cfg),
+        forward_fn=task_plugin.get_forward_fn(),
+        postprocess_fn=task_plugin.build_eval_postprocessor(eval_cfg),
+        save_prediction_fn=task_plugin.save_eval_prediction,
+        metric_accumulator=task_plugin.build_eval_metric_accumulator(eval_cfg),
+        eval_cfg_raw=eval_cfg,
+        checkpoint_path=checkpoint_path,
+        model_uri=None,
     )
 
-    contract_path = write_eval_contract(contract)
-    summary = summarize_eval_contract(contract)
+    print("[evaluate] done")
+    print(f"[evaluate] scenes={outputs.summary.get('num_scenes')}")
+    print(f"[evaluate] summary={outputs.summary_path}")
+    print(f"[evaluate] manifest={outputs.manifest_path}")
+    print(f"[evaluate] per_scene_table={outputs.per_scene_table_path}")
+    print(f"[evaluate] probabilities={outputs.probability_dir}")
+    print(f"[evaluate] masks={outputs.mask_dir}")
 
-    _print_summary(summary)
-    print(f"[eval] contract={contract_path}")
+    metrics = outputs.summary.get("metrics", {})
+    if metrics:
+        print(f"[evaluate] metrics={json.dumps(metrics, indent=2)}")
+
     return 0
 
 
