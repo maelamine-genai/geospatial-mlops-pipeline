@@ -17,11 +17,21 @@ from geo_mlops.core.tiling.adapters.base import (
 @dataclass
 class AllPolicy:
     """
-    Include every tile unconditionally (except engine-level nodata skips).
+    Annotate every valid tile as selectable.
+
+    Important:
+      - The tiling engine may still skip invalid/nodata tiles.
+      - This policy never filters valid tiles out of the master CSV.
     """
 
+    sample_prefix: str = "sample__"
+
     def extra_row_fields(self) -> Dict[str, Any]:
-        return {}
+        return {
+            f"{self.sample_prefix}include": True,
+            f"{self.sample_prefix}policy": "all",
+            f"{self.sample_prefix}reason": "all",
+        }
 
     def decide_include(
         self,
@@ -33,31 +43,49 @@ class AllPolicy:
         roi_pred_missing: bool,
     ) -> Tuple[bool, Dict[str, Any]]:
         _ = (adapter, scene, arr, tw, roi_pred_missing)
-        return True, {}
+
+        extra = {
+            f"{self.sample_prefix}include": True,
+            f"{self.sample_prefix}policy": "all",
+            f"{self.sample_prefix}reason": "all",
+        }
+
+        # Always emit valid tiles.
+        return True, extra
 
 
 # -------------------------
-# RegularPolicy (GT presence)
+# RegularPolicy
 # -------------------------
 @dataclass
 class RegularPolicy:
     """
-    GT-based inclusion policy.
-    Uses adapter.gt_presence(...) which returns PresenceResult(value, details).
-    Include if presence.value >= gt_presence_threshold.
-    For instance, if the water segmentation adapter defines the presence of water to be True
-    if water fraction in chip is > 10% --> only chips with > 10% water pixels will be retained in the generated csv
+    GT-presence scoring policy.
+
+    This no longer filters tiles during tiling.
+
+    It annotates each tile with:
+      - presence__* fields
+      - sample__include: whether this tile should be used by train-time sampling
+      - sample__policy: regular
+      - sample__reason
+
+    The validation/test partitions should ignore sample__include and use all valid rows.
     """
 
     gt_presence_threshold: float = 1e-6
     require_presence: bool = True
 
-    # Prefix keys to avoid collisions with task columns
     details_prefix: str = "presence__"
+    sample_prefix: str = "sample__"
 
     def extra_row_fields(self) -> Dict[str, Any]:
-        key = f"{self.details_prefix}value"
-        return {key: 0.0}
+        return {
+            f"{self.details_prefix}value": 0.0,
+            f"{self.sample_prefix}include": False,
+            f"{self.sample_prefix}policy": "regular",
+            f"{self.sample_prefix}reason": "",
+        }
 
     def decide_include(
         self,
@@ -68,59 +96,78 @@ class RegularPolicy:
         tw: TileWindow,
         roi_pred_missing: bool,
     ) -> Tuple[bool, Dict[str, Any]]:
-        _ = roi_pred_missing  # regular policy doesn't care about ROI-level pred state
-
-        if not self.require_presence:
-            return True, {}
+        _ = roi_pred_missing
 
         pres = adapter.gt_presence(scene=scene, arr=arr, tw=tw)
-        include = float(pres.value) >= float(self.gt_presence_threshold)
+
+        presence_value = float(pres.value)
+        sample_include = (
+            True
+            if not self.require_presence
+            else presence_value >= float(self.gt_presence_threshold)
+        )
 
         extra: Dict[str, Any] = {}
-        # Bubble details into CSV
+
         if pres.details:
             if self.details_prefix:
-                extra.update({f"{self.details_prefix}{k}": v for k, v in pres.details.items()})
+                extra.update(
+                    {f"{self.details_prefix}{k}": v for k, v in pres.details.items()}
+                )
             else:
                 extra.update(pres.details)
 
-        # Useful to always emit presence value
-        extra.setdefault(f"{self.details_prefix}value", float(pres.value))
+        extra.setdefault(f"{self.details_prefix}value", presence_value)
 
-        return include, extra
+        extra[f"{self.sample_prefix}include"] = bool(sample_include)
+        extra[f"{self.sample_prefix}policy"] = "regular"
+        extra[f"{self.sample_prefix}reason"] = (
+            "presence_pass"
+            if sample_include
+            else "presence_below_threshold"
+        )
+
+        # Always emit valid tiles into master CSV.
+        return True, extra
 
 
 # -------------------------
-# HardMiningPolicy (Pred vs GT difficulty)
+# HardMiningPolicy
 # -------------------------
 @dataclass
 class HardMiningPolicy:
     """
-    Include tiles based on disagreement/difficulty between pred and gt.
-    Strict mode:
-      - No fallback behavior
-      - If predictions are missing (ROI dir missing OR per-scene pred missing), raise immediately
-    For instance, if the water segmentation adapter defines the difficulty of water to be True
-    if Prediction is > 10% different from Ground Truth
-    --> only chips with > 10% difference will be retained in the generated csv
-    This policy is configured to always include chips containing class-of-interest
-    irrespective of its difficulty, so if water if present in a chip -> included in csv
+    Hard-mining scoring policy.
+
+    This no longer filters tiles during tiling.
+
+    It annotates each tile with:
+      - presence__* fields
+      - difficulty__* fields
+      - sample__include: whether this tile should be used by train-time sampling
+      - sample__policy: hard_mining
+      - sample__reason
+
+    The validation/test partitions should ignore sample__include and use all valid rows.
     """
 
-    # thresholds on DifficultyResult.value (higher => harder)
     min_difficulty: float = 1e-6
 
-    # include positives even if not hard
     include_if_gt_present: bool = True
     gt_presence_threshold: float = 1e-6
 
     presence_prefix: str = "presence__"
     difficulty_prefix: str = "difficulty__"
+    sample_prefix: str = "sample__"
 
     def extra_row_fields(self) -> Dict[str, Any]:
-        pres_key = f"{self.presence_prefix}value"
-        diff_key = f"{self.difficulty_prefix}value"
-        return {pres_key: 0.0, diff_key: 0.0}
+        return {
+            f"{self.presence_prefix}value": 0.0,
+            f"{self.difficulty_prefix}value": 0.0,
+            f"{self.sample_prefix}include": False,
+            f"{self.sample_prefix}policy": "hard_mining",
+            f"{self.sample_prefix}reason": "",
+        }
 
     def decide_include(
         self,
@@ -131,17 +178,12 @@ class HardMiningPolicy:
         tw: TileWindow,
         roi_pred_missing: bool,
     ) -> Tuple[bool, Dict[str, Any]]:
-        # -------------------------
-        # Strict prediction requirement
-        # -------------------------
         if roi_pred_missing:
-            # ROI-level: preds directory missing (or not provided)
             raise FileNotFoundError(
                 "HardMiningPolicy requires predictions, but preds directory is missing for ROI: "
                 f"{scene.region}/{scene.subregion}"
             )
 
-        # Per-scene: preds expected but not loaded for this scene
         if arr.pred2d is None:
             raise ValueError(
                 "HardMiningPolicy requires predictions, but pred2d is None for scene/tile: "
@@ -150,34 +192,62 @@ class HardMiningPolicy:
 
         extra: Dict[str, Any] = {}
 
-        # -------------------------
-        # Optionally include positives always
-        # -------------------------
-        if self.include_if_gt_present:
-            pres = adapter.gt_presence(scene=scene, arr=arr, tw=tw)
-            extra.update(self._pack_details(pres.value, pres.details, prefix=self.presence_prefix))
+        pres = adapter.gt_presence(scene=scene, arr=arr, tw=tw)
+        presence_value = float(pres.value)
+        extra.update(
+            self._pack_details(
+                presence_value,
+                pres.details,
+                prefix=self.presence_prefix,
+            )
+        )
 
-            if float(pres.value) >= float(self.gt_presence_threshold):
-                # still compute difficulty for diagnostics
-                diff = adapter.difficulty(scene=scene, arr=arr, tw=tw)
-                extra.update(self._pack_details(diff.value, diff.details, prefix=self.difficulty_prefix))
-                return True, extra
-
-        # -------------------------
-        # Otherwise include if difficulty exceeds threshold
-        # -------------------------
         diff = adapter.difficulty(scene=scene, arr=arr, tw=tw)
-        extra.update(self._pack_details(diff.value, diff.details, prefix=self.difficulty_prefix))
-        include = float(diff.value) >= float(self.min_difficulty)
-        return include, extra
+        difficulty_value = float(diff.value)
+        extra.update(
+            self._pack_details(
+                difficulty_value,
+                diff.details,
+                prefix=self.difficulty_prefix,
+            )
+        )
+
+        presence_pass = presence_value >= float(self.gt_presence_threshold)
+        difficulty_pass = difficulty_value >= float(self.min_difficulty)
+
+        sample_include = difficulty_pass or (
+            bool(self.include_if_gt_present) and presence_pass
+        )
+
+        if difficulty_pass:
+            reason = "difficulty_pass"
+        elif bool(self.include_if_gt_present) and presence_pass:
+            reason = "presence_pass"
+        else:
+            reason = "not_hard_and_no_presence"
+
+        extra[f"{self.sample_prefix}include"] = bool(sample_include)
+        extra[f"{self.sample_prefix}policy"] = "hard_mining"
+        extra[f"{self.sample_prefix}reason"] = reason
+
+        # Always emit valid tiles into master CSV.
+        return True, extra
 
     @staticmethod
-    def _pack_details(value: float, details: Dict[str, Any] | None, *, prefix: str) -> Dict[str, Any]:
+    def _pack_details(
+        value: float,
+        details: Dict[str, Any] | None,
+        *,
+        prefix: str,
+    ) -> Dict[str, Any]:
         key = f"{prefix}value" if prefix else "value"
         out: Dict[str, Any] = {key: float(value)}
+
         if details:
             if prefix:
                 out.update({f"{prefix}{k}": v for k, v in details.items()})
             else:
                 out.update(details)
+
         return out
+    
