@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geo-mlops"
+version = "0.1.0"
+description = "Contract-driven geospatial MLOps pipeline for remote sensing ML workflows."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Mouhamad Ali Elamine" }
+]
+dependencies = [
+    "mlflow>=3.11,<4",
+    "numpy>=2.0,<3",
+    "pandas>=2.0,<4",
+    "psutil>=7.0,<8",
+    "pydantic>=2.0,<3",
+    "pyproj>=3.7,<4",
+    "pyyaml>=6.0,<7",
+    "rasterio>=1.4,<2",
+    "torch>=2.0",
+    "torchvision>=0.20",
+    "tqdm>=4.0,<5",
+    "transformers>=5.0,<6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.8",
+    "mypy>=1.0",
+    "pre-commit>=4.0",
+]
+
+ray = [
+    "ray[train,tune]>=2.9",
+]
+
+notebooks = [
+    "jupyter>=1.0",
+    "ipykernel>=6.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
