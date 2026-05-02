@@ -1,1 +1,1 @@
--e .[dev,ray,notebooks]
+-e .[ml,ray,dev,notebooks]

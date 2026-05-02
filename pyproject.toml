@@ -20,22 +20,34 @@ dependencies = [
     "pyproj>=3.7,<4",
     "pyyaml>=6.0,<7",
     "rasterio>=1.4,<2",
-    "torch>=2.0",
-    "torchvision>=0.20",
     "tqdm>=4.0,<5",
-    "transformers>=5.0,<6",
 ]
 
 [project.optional-dependencies]
+torch = [
+    "torch>=2.0",
+    "torchvision>=0.20",
+]
+
+models = [
+    "transformers>=4.40,<6",
+]
+
+ml = [
+    "torch>=2.0",
+    "torchvision>=0.20",
+    "transformers>=4.40,<6",
+]
+
+ray = [
+    "ray[train,tune]>=2.9",
+]
+
 dev = [
     "pytest>=8",
     "ruff>=0.8",
     "mypy>=1.0",
     "pre-commit>=4.0",
-]
-
-ray = [
-    "ray[train,tune]>=2.9",
 ]
 
 notebooks = [
