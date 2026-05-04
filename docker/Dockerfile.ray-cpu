@@ -1,0 +1,33 @@
+FROM geospatial-mlops:slim
+
+WORKDIR /workspace
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV PIP_DEFAULT_TIMEOUT=300
+ENV PIP_RETRIES=10
+ENV PIP_PROGRESS_BAR=off
+ENV PIP_ROOT_USER_ACTION=ignore
+
+COPY requirements-ray-cpu.txt ./
+
+# Install CPU-only PyTorch wheels first.
+RUN python -m pip install \
+    --retries 10 \
+    --timeout 300 \
+    --progress-bar off \
+    --root-user-action=ignore \
+    --index-url https://download.pytorch.org/whl/cpu \
+    torch torchvision
+
+# Install the repo's ML/Ray extras.
+# Since torch/torchvision are already satisfied, pip should not pull CUDA torch wheels.
+RUN python -m pip install \
+    --retries 10 \
+    --timeout 300 \
+    --progress-bar off \
+    --root-user-action=ignore \
+    -r requirements-ray-cpu.txt
+
+CMD ["bash"]

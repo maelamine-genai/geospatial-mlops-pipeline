@@ -1,0 +1,37 @@
+FROM python:3.11-slim
+
+WORKDIR /workspace
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV PIP_DEFAULT_TIMEOUT=120
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    build-essential \
+    gcc \
+    g++ \
+    libgl1 \
+    libglib2.0-0 \
+    gdal-bin \
+    libgdal-dev \
+    libproj-dev \
+    proj-bin \
+    proj-data \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml README.md requirements.txt ./
+COPY src ./src
+COPY tests ./tests
+
+RUN python -m pip install --upgrade pip setuptools wheel
+
+RUN python -m pip install \
+    --retries 10 \
+    --timeout 120 \
+    --progress-bar off \
+    -r requirements.txt
+
+CMD ["bash"]

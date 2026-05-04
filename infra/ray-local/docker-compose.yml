@@ -1,0 +1,60 @@
+# infra/ray-local/docker-compose.yml
+
+services:
+  ray-head:
+    image: geospatial-mlops:ray-cpu
+    container_name: geo-ray-head
+    hostname: ray-head
+    working_dir: /workspace
+    shm_size: "6gb"
+    ports:
+      - "8265:8265"   # Ray dashboard
+      - "6379:6379"   # Ray GCS/head port
+    environment:
+      PYTHONUNBUFFERED: "1"
+      RAY_DISABLE_IMPORT_WARNING: "1"
+    volumes:
+      - ../..:/workspace
+      - ../../outputs:/outputs
+      - ../../mlruns:/mlruns
+      - /mnt/d/SpaceNet:/datasets/SpaceNet
+    command: >
+      bash -lc "ray start --head --node-ip-address=ray-head --port=6379 --dashboard-host=0.0.0.0 --dashboard-port=8265 --num-cpus=2 --disable-usage-stats --block"
+
+  ray-worker-1:
+    image: geospatial-mlops:ray-cpu
+    container_name: geo-ray-worker-1
+    hostname: ray-worker-1
+    working_dir: /workspace
+    shm_size: "6gb"
+    depends_on:
+      - ray-head
+    environment:
+      PYTHONUNBUFFERED: "1"
+      RAY_DISABLE_IMPORT_WARNING: "1"
+    volumes:
+      - ../..:/workspace
+      - ../../outputs:/outputs
+      - ../../mlruns:/mlruns
+      - /mnt/d/SpaceNet:/datasets/SpaceNet
+    command: >
+      bash -lc "sleep 10 && ray start --address=ray-head:6379 --num-cpus=2 --disable-usage-stats --block"
+
+  ray-worker-2:
+    image: geospatial-mlops:ray-cpu
+    container_name: geo-ray-worker-2
+    hostname: ray-worker-2
+    working_dir: /workspace
+    shm_size: "6gb"
+    depends_on:
+      - ray-head
+    environment:
+      PYTHONUNBUFFERED: "1"
+      RAY_DISABLE_IMPORT_WARNING: "1"
+    volumes:
+      - ../..:/workspace
+      - ../../outputs:/outputs
+      - ../../mlruns:/mlruns
+      - /mnt/d/SpaceNet:/datasets/SpaceNet
+    command: >
+      bash -lc "sleep 10 && ray start --address=ray-head:6379 --num-cpus=2 --disable-usage-stats --block"
